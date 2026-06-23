@@ -1,0 +1,17 @@
+# Virtual environment
+venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Model weights
+*.pth
+*.bin
+*.safetensors
+
+# Data — too large for GitHub
+backend/data/
+
+# Environment variables
+.env
