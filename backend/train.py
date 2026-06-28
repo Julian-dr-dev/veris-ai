@@ -114,6 +114,71 @@ class NormalImageDataset(Dataset):
                 std=[0.229, 0.224, 0.225],
             ),
         ])
+    
+    def __len__(self):
+        return len(self.paths)
+    
+    def __getitem__(self, idx):
+        img = Image.open(self.paths[idx]).convert("RGB")
+        if self.augment:
+            return self.train_transform(img)
+        else:
+            return self.val_transform(img)
+
+
+
+        
+def build_dataloaders(cfg):
+
+    full_dataset = NormalImageDataset(
+        cfg.train_dir, cfg,img_size, augment=False
+    )
+    
+    n_total = len(full_dataset)
+    n_val = max(1, int(n_total * cfg.val_split))
+    n_train = n_total - n_val
+
+    train_paths = full_dataset.paths[:n_train]
+    val_paths = full_dataset.paths[n_train:]
+
+    print(f"  [data] Train: {len(train_paths)} | Val: {len(val_paths)}")
+
+    class SubsetDataset(Dataset):
+        def __init__(self, paths, transform):
+            self.paths = paths
+            self.transform = transform
+
+        def __len__(self):
+            return len(self.paths)
+        
+        def __getitem__(self, idx):
+            img = Image.open(self.paths[idx]).convert("RGB")
+            return self.transform(img)
+        
+
+    train_transform = NormalImageDataset(
+        cfg.train_dir, cfg.img_size, augment=True
+    ).train_transform
+
+    val_transform = NormalImageDataset(
+        cfg.train_dir, cfg.img_size, augment=False
+    ).val_transform
+
+
+    train_ds = SubsetDataset(train_paths, train_transform)
+    val_ds = SubsetDataset(val_paths, val_transform)
+
+    train_loader = DataLoader(
+        
+
+    )
+
+
+
+
+
+
+
 
     
 
