@@ -23,29 +23,29 @@ from typing import List, Tuple, Optional
 
 class PatchEmbedding(nn.Module):
 
-
     def __init__(
-            self, img_size: int = 224,
-            patch_size: int = 16,
-            in_channels: int = 3,
-            embed_dim: int = 768,
-        
+        self,
+        img_size:    int = 224,
+        patch_size:  int = 16,
+        in_channels: int = 3,
+        embed_dim:   int = 768,
     ):
-        super().__int__()
-
-        self.img_size   = img_size
-        self.patch_size = patch_size
+        super().__init__()
+        self.img_size    = img_size
+        self.patch_size  = patch_size
         self.num_patches = (img_size // patch_size) ** 2
+        self.projection  = nn.Conv2d(
+            in_channels,
+            embed_dim,
+            kernel_size=patch_size,
+            stride=patch_size,
+        )
 
-
-        def forward(self, x: torch.Tensor) -> torch.Tensor:
-
-            x = self.projection(x)
-            x = x.flatten(2)
-
-            x = x.transpose(1, 2)
-
-            return x
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.projection(x)
+        x = x.flatten(2)
+        x = x.transpose(1, 2)
+        return x
 
 
 
@@ -84,7 +84,7 @@ class MultiHeadSelfAttention(nn.Module):
 
         B, N, C = x.shape
         
-        okv = self.qkv(x)
+        qkv = self.qkv(x)
 
         qkv = qkv.reshape(B, N, 3, self.num_heads, self.head_dim)
         qkv = qkv.permute(2, 0, 3, 1, 4)
@@ -100,7 +100,7 @@ class MultiHeadSelfAttention(nn.Module):
 
         x = attn @ v
 
-        x = x.transpose(1, 2).reshape(B, C, C)
+        x = x.transpose(1, 2).reshape(B, N, C)
 
         x = self.proj(x)
 
@@ -110,7 +110,7 @@ class MultiHeadSelfAttention(nn.Module):
 
  # TRANSFORMER BLOCK
 
-class TransformBlock(nn.Module):
+class TransformerBlock(nn.Module):
 
 
 
@@ -184,7 +184,7 @@ class VisionTransformerEncoder(nn.Module):
 
 
         self.blocks = nn.ModuleList([
-            TransformBlock(embed_dim, num_heads, mlp_ratio, dropout)
+            TransformerBlock(embed_dim, num_heads, mlp_ratio, dropout)
             for _ in range(depth)
         ])
 
@@ -247,7 +247,7 @@ class Predictor(nn.Module):
 
 
         self.blocks = nn.ModuleList([
-            TransformBlock(predictor_dim, num_heads, mlp_ratio=4.0)
+            TransformerBlock(predictor_dim, num_heads, mlp_ratio=4.0)
             for _ in range(depth)
         ])
 
@@ -380,7 +380,7 @@ class IJEPA(nn.Module):
         pred_depth:    int   = 6,
         pred_heads:    int   = 12,
         ema_decay:     float = 0.996,
-):
+    ):
         
 
         super().__init__()
@@ -422,6 +422,7 @@ class IJEPA(nn.Module):
         
 
         #updater:
+    @torch.no_grad()
     def update_target_encoder(self):
 
         for ctx_param, tgt_param in zip(
@@ -434,30 +435,27 @@ class IJEPA(nn.Module):
             )
     
 
+
+
     def forward(
         self,
         x: torch.Tensor,
         context_indices: torch.Tensor,
-        target_indeces: List[torch.Tensor],
-
-        
+        target_indices: List[torch.Tensor],
     ) -> torch.Tensor:
-        
-
 
         context_embeddings = self.context_encoder(x, context_indices)
 
         with torch.no_grad():
-            
             all_target_embeddings = self.target_encoder(x)
-        
-        total_loss = 0.0
-        n_blocks = len(target_indeces)
 
-        for block_indices in target_indeces:
+        total_loss = 0.0
+        n_blocks   = len(target_indices)
+
+        for block_indices in target_indices:
             block_indices = block_indices.to(x.device)
 
-            target = all_target_embeddings[:, block_indices, :]
+            targets = all_target_embeddings[:, block_indices, :]
 
             predictions = self.predictor(
                 context_embeddings,
@@ -466,12 +464,14 @@ class IJEPA(nn.Module):
             )
 
             predictions = F.normalize(predictions, dim=-1)
-            targets = F.normalize(targets, dim=-1)
+            targets     = F.normalize(targets,     dim=-1)
 
-            loss = F.mse_loss(predictions, targets)
+            loss        = F.mse_loss(predictions, targets)
             total_loss += loss
 
         return total_loss / n_blocks
+
+
     
 
 
@@ -479,8 +479,7 @@ class IJEPA(nn.Module):
 
 #anamoly scoring: 
 @torch.no_grad()
-
-def compute_anamoly_score(
+def compute_anomoly_score(
     model: IJEPA, 
     x: torch.Tensor,
     n_masks: int = 10,
@@ -497,7 +496,7 @@ def compute_anamoly_score(
     patch_counts = torch.zeros(num_patches, device=device)
 
     for _ in range(n_masks):
-        context_indices, target_blocks, = create_masks(
+        context_indices, target_blocks = create_masks(
             num_patches,
             patch_grid=model.patch_grid,
         )
@@ -511,7 +510,7 @@ def compute_anamoly_score(
         for block_indices in target_blocks:
             block_indices = block_indices.to(device)
 
-            target = all_target_embs[:, block_indices, :]
+            targets = all_target_embs[:, block_indices, :]
 
             predictions = model.predictor(
                 context_embs, context_indices, block_indices
